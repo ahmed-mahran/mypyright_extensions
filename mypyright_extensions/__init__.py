@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Callable, Concatenate, Type
+from typing import Callable, Concatenate, Self, Type
 
 
 class _MyPyright(ABC):
@@ -16,12 +16,21 @@ class Map[F, *Ts](_MyPyright):
   """
   pass
 
-class subscriptable[*T, **P, R]:
-  def __init__(self, fn: Callable[Concatenate[Map[Type, *T], P], R]) -> None:
+class subscriptable[Owner, *T, **P, R]:
+  def __init__(self, fn: Callable[Concatenate[Map[Type, *T], P], R] | Callable[Concatenate[Owner, Map[Type, *T], P], R]) -> None:
     self.fn = fn
+    self.instance = None
+
+  def __get__(self, instance: Owner, owner: Type[Owner]) -> Self:
+    self.instance = instance
+    return self
 
   def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
-    def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+    def inner_function(*args: P.args, **kwargs: P.kwargs) -> R:
       return self.fn(tp, *args, **kwargs)
+    
+    def inner_method(*args: P.args, **kwargs: P.kwargs) -> R:
+      return self.fn(self.instance, tp, *args, **kwargs)
+    
     # inner.__type_params__ = (T,)
-    return inner
+    return inner_function if self.instance is None else inner_method
