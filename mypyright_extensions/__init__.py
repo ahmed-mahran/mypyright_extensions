@@ -34,3 +34,27 @@ class subscriptable[Owner, *T, **P, R]:
     
     # inner.__type_params__ = (T,)
     return inner_function if self.instance is None else inner_method
+
+class subscriptablefunction[*T, **P, R]:
+  def __init__(self, fn: Callable[Concatenate[Map[Type, *T], P], R]) -> None:
+    self.fn = fn
+
+  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
+    def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+      return self.fn(tp, *args, **kwargs)
+    # inner.__type_params__ = (T,)
+    return inner
+
+class subscriptablemethod[Owner, *T, **P, R]:
+  def __init__(self, fn: Callable[Concatenate[Owner, Map[Type, *T], P], R]) -> None:
+    self.fn = fn
+
+  def __get__(self, instance: Owner, owner: Type[Owner]) -> Self:
+    self.instance = instance
+    return self
+
+  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
+    def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+      return self.fn(self.instance, tp, *args, **kwargs)
+    # inner.__type_params__ = (T,)
+    return inner
