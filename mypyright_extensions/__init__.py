@@ -1,5 +1,6 @@
 from abc import ABC
-from typing import Callable, Concatenate, Self, Type
+from types import NoneType
+from typing import Callable, Protocol, Self, Type, cast
 
 
 class _MyPyright(ABC):
@@ -16,45 +17,109 @@ class Map[F, *Ts](_MyPyright):
   """
   pass
 
-class subscriptable[Owner, *T, **P, R]:
-  def __init__(self, fn: Callable[Concatenate[Map[Type, *T], P], R] | Callable[Concatenate[Owner, Map[Type, *T], P], R]) -> None:
+
+class _SubscriptableFunctionSingle[T, **P, R](Protocol):
+  def __call__(self, tp: Type[T], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+class _SubscriptableFunctionVariadic[*Ts, **P, R](Protocol):
+  def __call__(self, tp: Map[Type, *Ts], /,  *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+class _SubscriptableMethodSingle[Owner, T, **P, R](Protocol):
+  def __call__(self, instance: Owner, tp: Type[T], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+class _SubscriptableMethodVariadic[Owner, *Ts, **P, R](Protocol):
+  def __call__(self, instance: Owner, tp: Map[Type, *Ts], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+class _SubscriptableClassMethodSingle[Owner, T, **P, R](Protocol):
+  def __call__(self, owner: Type[Owner], tp: Type[T], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+class _SubscriptableClassMethodVariadic[Owner, *Ts, **P, R](Protocol):
+  def __call__(self, owner: Type[Owner], tp: Map[Type, *Ts], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+class subscriptable[Owner, T, *Ts, **P, R]:
+  def __init__(
+      self,
+      fn: (
+        _SubscriptableFunctionVariadic[*Ts, P, R] |
+        _SubscriptableFunctionSingle[T, P, R] |
+        _SubscriptableMethodVariadic[Owner, *Ts, P, R] |
+        _SubscriptableMethodSingle[Owner, T, P, R] |
+        _SubscriptableClassMethodVariadic[Owner, *Ts, P, R] |
+        _SubscriptableClassMethodSingle[Owner, T, P, R]
+      )
+  ) -> None:
     self.fn = fn
     self.instance = None
+    self.owner = None
 
-  def __get__(self, instance: Owner, owner: Type[Owner]) -> Self:
+  def __get__(self, instance: Owner | None, owner: Type[Owner]) -> Self:
     self.instance = instance
+    self.owner = owner
     return self
 
-  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
-    def inner_function(*args: P.args, **kwargs: P.kwargs) -> R:
-      return self.fn(tp, *args, **kwargs)
-    
-    def inner_method(*args: P.args, **kwargs: P.kwargs) -> R:
-      return self.fn(self.instance, tp, *args, **kwargs)
-    
-    # inner.__type_params__ = (T,)
-    return inner_function if self.instance is None else inner_method
+  def __getitem__(self, tp: Map[Type, *Ts] | Type[T]) -> Callable[P, R]:
+    instance = self.instance
+    owner = self.owner
+    if instance is None and owner is None:
+      fn = cast(_SubscriptableFunctionVariadic[*Ts, P, R] | _SubscriptableFunctionSingle[T, P, R], self.fn)
+      def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+        # we depend on type checker to change tp type to match that of fn
+        return fn(tp, *args, **kwargs) #type: ignore
+      return inner
+    elif instance is not None and owner is not None:
+      fn = cast(_SubscriptableMethodVariadic[Owner, *Ts, P, R] | _SubscriptableMethodSingle[Owner, T, P, R], self.fn)
+      def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+        # we depend on type checker to change tp type to match that of fn
+        return fn(instance, tp, *args, **kwargs) #type: ignore
+      return inner
+    else:
+      fn = cast(_SubscriptableClassMethodVariadic[Owner, *Ts, P, R] | _SubscriptableClassMethodSingle[Owner, T, P, R], self.fn)
+      def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+        # we depend on type checker to change tp type to match that of fn
+        return fn(owner, tp, *args, **kwargs) #type: ignore
+      return inner
 
-class subscriptablefunction[*T, **P, R]:
-  def __init__(self, fn: Callable[Concatenate[Map[Type, *T], P], R]) -> None:
+    # # inner.__type_params__ = (T,)
+    # return inner_function if self.instance is None else inner_method
+
+
+class subscriptablefunction[T, *Ts, **P, R]:
+  def __init__(self, fn: _SubscriptableFunctionVariadic[*Ts, P, R] | _SubscriptableFunctionSingle[T, P, R]) -> None:
     self.fn = fn
 
-  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
+  def __getitem__(self, tp: Map[Type, *Ts] | Type[T]) -> Callable[P, R]:
     def inner(*args: P.args, **kwargs: P.kwargs) -> R:
-      return self.fn(tp, *args, **kwargs)
+      # we depend on type checker to change tp type to match that of fn
+      return self.fn(tp, *args, **kwargs) #type: ignore
     # inner.__type_params__ = (T,)
     return inner
 
-class subscriptablemethod[Owner, *T, **P, R]:
-  def __init__(self, fn: Callable[Concatenate[Owner, Map[Type, *T], P], R]) -> None:
+class subscriptablemethod[Owner, T, *Ts, **P, R]:
+  def __init__(self, fn: _SubscriptableMethodVariadic[Owner, *Ts, P, R] | _SubscriptableMethodSingle[Owner, T, P, R]) -> None:
     self.fn = fn
 
   def __get__(self, instance: Owner, owner: Type[Owner]) -> Self:
     self.instance = instance
     return self
 
-  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
+  def __getitem__(self, tp: Map[Type, *Ts] | Type[T]) -> Callable[P, R]:
     def inner(*args: P.args, **kwargs: P.kwargs) -> R:
-      return self.fn(self.instance, tp, *args, **kwargs)
+      # we depend on type checker to change tp type to match that of fn
+      return self.fn(self.instance, tp, *args, **kwargs) #type: ignore
+    # inner.__type_params__ = (T,)
+    return inner
+
+class subscriptableclassmethod[Owner, T, *Ts, **P, R]:
+  def __init__(self, fn: _SubscriptableClassMethodVariadic[Owner, *Ts, P, R] | _SubscriptableClassMethodSingle[Owner, T, P, R]) -> None:
+    self.fn = fn
+
+  def __get__(self, instance: NoneType, owner: Type[Owner]) -> Self:
+    self.owner = owner
+    return self
+
+  def __getitem__(self, tp: Map[Type, *Ts] | Type[T]) -> Callable[P, R]:
+    def inner(*args: P.args, **kwargs: P.kwargs) -> R:
+      # we depend on type checker to change tp type to match that of fn
+      return self.fn(self.owner, tp, *args, **kwargs) #type: ignore
     # inner.__type_params__ = (T,)
     return inner
