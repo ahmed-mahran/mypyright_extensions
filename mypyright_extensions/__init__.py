@@ -87,7 +87,22 @@ class subscriptable[Owner, T, *Ts, **P, R]:
       return inner
 
     # # inner.__type_params__ = (T,)
-    # return inner_function if self.instance is None else inner_method
+  
+  def __call__(self, tp: Map[Type, *Ts] | Type[T], *args: P.args, **kwargs: P.kwargs) -> R:
+    instance = self.instance
+    owner = self.owner
+    if instance is None and owner is None:
+      fn = cast(_SubscriptableFunctionVariadic[*Ts, P, R] | _SubscriptableFunctionSingle[T, P, R], self.fn)
+      # we depend on type checker to change tp type to match that of fn
+      return fn(tp, *args, **kwargs) #type: ignore
+    elif instance is not None and owner is not None:
+      fn = cast(_SubscriptableMethodVariadic[Owner, *Ts, P, R] | _SubscriptableMethodSingle[Owner, T, P, R], self.fn)
+      # we depend on type checker to change tp type to match that of fn
+      return fn(instance, tp, *args, **kwargs) #type: ignore
+    else:
+      fn = cast(_SubscriptableClassMethodVariadic[Owner, *Ts, P, R] | _SubscriptableClassMethodSingle[Owner, T, P, R], self.fn)
+      # we depend on type checker to change tp type to match that of fn
+      return fn(owner, tp, *args, **kwargs) #type: ignore
 
 
 class subscriptablefunction[T, *Ts, **P, R]:
@@ -102,6 +117,10 @@ class subscriptablefunction[T, *Ts, **P, R]:
       # we depend on type checker to change tp type to match that of fn
       return self.fn(tp, *args, **kwargs) #type: ignore
     return inner
+  
+  def __call__(self, tp: Map[Type, *Ts] | Type[T], *args: P.args, **kwargs: P.kwargs) -> R:
+    # we depend on type checker to change tp type to match that of fn
+    return self.fn(tp, *args, **kwargs) #type: ignore
 
 class subscriptablemethod[Owner, T, *Ts, **P, R]:
   def __init__(self, fn: _SubscriptableMethodVariadic[Owner, *Ts, P, R] | _SubscriptableMethodSingle[Owner, T, P, R]) -> None:
@@ -120,6 +139,10 @@ class subscriptablemethod[Owner, T, *Ts, **P, R]:
       return self.fn(self.instance, tp, *args, **kwargs) #type: ignore
     # inner.__type_params__ = (T,)
     return inner
+  
+  def __call__(self, tp: Map[Type, *Ts] | Type[T], *args: P.args, **kwargs: P.kwargs) -> R:
+    # we depend on type checker to change tp type to match that of fn
+    return self.fn(self.instance, tp, *args, **kwargs) #type: ignore
 
 class subscriptableclassmethod[Owner, T, *Ts, **P, R]:
   def __init__(self, fn: _SubscriptableClassMethodVariadic[Owner, *Ts, P, R] | _SubscriptableClassMethodSingle[Owner, T, P, R]) -> None:
@@ -138,3 +161,7 @@ class subscriptableclassmethod[Owner, T, *Ts, **P, R]:
       return self.fn(self.owner, tp, *args, **kwargs) #type: ignore
     # inner.__type_params__ = (T,)
     return inner
+  
+  def __call__(self, tp: Map[Type, *Ts] | Type[T], *args: P.args, **kwargs: P.kwargs) -> R:
+    # we depend on type checker to change tp type to match that of fn
+    return self.fn(self.owner, tp, *args, **kwargs) #type: ignore
