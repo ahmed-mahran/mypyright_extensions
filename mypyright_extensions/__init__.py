@@ -165,3 +165,29 @@ class subscriptableclassmethod[Owner, T, *Ts, **P, R]:
   def __call__(self, tp: Map[Type, *Ts] | Type[T], *args: P.args, **kwargs: P.kwargs) -> R:
     # we depend on type checker to change tp type to match that of fn
     return self.fn(self.owner, tp, *args, **kwargs) #type: ignore
+
+#################################################################################################
+
+def print_type(tp: type) -> str:
+  def traverse_type(t: type) -> str:
+    if hasattr(t, '__origin__'):
+      repr = t.__origin__.__name__
+      if len(t.__args__) > 0:
+        repr += '[' + (',').join([traverse_type(arg) for arg in t.__args__]) + ']'
+      return repr
+    else:
+      return t.__name__ if hasattr(t, '__name__') else str(t)
+  return traverse_type(tp)
+
+
+class TypeMap[*Params](ABC):
+  @classmethod
+  def map_type(cls, origin: str, type_args: tuple[type, ...]) -> str:
+    if len(type_args) > 0:
+      cls.__name__ + '[' + ','.join([print_type(arg) for arg in type_args]) + ']'
+    return cls.__name__
+
+
+def map_type[*Ts](type_map: type[TypeMap[*Ts]]) -> str:
+  type_args = getattr(type_map, '__args__', ())
+  return type_map.map_type(print_type(type_map), type_args)
