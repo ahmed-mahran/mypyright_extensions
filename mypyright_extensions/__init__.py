@@ -1,6 +1,8 @@
+from __future__ import annotations
+import ast
 from abc import ABC
 import functools
-from types import NoneType
+from types import ModuleType, NoneType
 from typing import Callable, Protocol, Self, Type, cast
 
 
@@ -177,6 +179,90 @@ def print_type(tp: type) -> str:
     else:
       return t.__name__ if hasattr(t, '__name__') else str(t)
   return traverse_type(tp)
+
+class TypeAsFunction[T, Result]:
+  base: type[T] | ast.expr
+  args: list[TypeAsFunction[T, Result]]
+  result: Result | None = None
+
+  def __init__(self, base: type[T] | ast.expr, args: list[TypeAsFunction[T, Result]] | None = None, result: Result | None = None):
+    self.base = base
+    self.args = args if args is not None else []
+    self.result = result
+
+  def __repr__(self):
+    return (
+      ((self.base.__name__ if hasattr(self.base, '__name__') else str(self.base)) if isinstance(self.base, type) else ast.dump(self.base)) +
+      ('[' + ', '.join([str(arg) for arg in self.args]) + ']' if len(self.args) > 0 else '') +
+      (' => ' + str(self.result) if self.result is not None else '')
+    )
+
+class SymbolTable[T]:
+  #TODO we may add type variables definitions as well
+  # key is type var name, value is type var definition
+  symbol_table: dict[str, str]
+  reference_table: dict[str, type[T]]
+  processed_files: set[str]
+  module: ModuleType
+
+  def __init__(self, symbol_table: str | dict[str, str]) -> None:
+    if isinstance(symbol_table, str):
+      symbol_table = cast(dict[str, str], ast.literal_eval(symbol_table))
+      assert isinstance(symbol_table, dict)
+    self.symbol_table = symbol_table
+    self.reference_table = {}
+    self.processed_files = set()
+    self.module = ModuleType('symbol_table_module')
+
+  def resolve_reference(self, reference: str) -> type[T] | None:
+    if reference in self.reference_table:
+      return self.reference_table[reference]
+    
+    if reference in self.symbol_table:
+      file = self.symbol_table[reference]
+      if file not in self.processed_files:
+        self.module.__dict__['__file__'] = file
+        with open(file) as f:
+          code = compile(f.read(), file, 'exec')
+          exec(code, self.module.__dict__)
+        self.processed_files.add(file)
+      
+      t = getattr(self.module, reference, None)
+      if t is not None: # and is type
+        self.reference_table[reference] = t
+      return t
+
+def resolve_types[T, Result](
+    expr: ast.expr,
+    symbol_table: SymbolTable[T],
+    default_result: Result | None = None
+  ) -> TypeAsFunction[T, Result]:
+    def _resolve_types(expr: ast.expr) -> TypeAsFunction[T, Result]:
+      args: list[ast.expr] = []
+
+      base_expr = expr
+      if isinstance(expr, ast.Subscript):
+        base_expr = expr.value
+        match expr.slice:
+          case ast.Tuple(elts):
+            args = elts
+          case _:
+            args = [expr.slice]
+
+      base_expr_id = ast.unparse(base_expr)
+      base_expr_type = symbol_table.resolve_reference(base_expr_id)
+
+      if base_expr_type is not None:
+        # it is a type of interest, continue traversal
+        return TypeAsFunction(base_expr_type, [_resolve_types(arg) for arg in args], default_result)
+      else:
+        # not an interesting type, and we can terminate traversal of this path
+        return TypeAsFunction(base_expr, [], default_result)
+    
+    return _resolve_types(expr)
+
+def parse_type_expr(type_expr: str) -> ast.expr:
+  return cast(ast.Expr, ast.parse(type_expr).body[0]).value
 
 class TypeMap[*Params](ABC):
   @staticmethod
